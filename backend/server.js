@@ -1,17 +1,20 @@
+// backend/server.js
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
+
+// Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// POST /api/download
-// Accepts { url, preview, mediaUrl }
-// - preview: returns all media info
-// - mediaUrl: downloads the specific media
+// ------------------
+// Instagram Download API
+// ------------------
 app.post('/api/download', async (req, res) => {
   const { url, preview, mediaUrl } = req.body;
 
@@ -73,12 +76,21 @@ app.post('/api/download', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-const path = require('path');
-app.use(express.static(path.join(__dirname, 'frontend', 'build')));
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'frontend', 'build', 'index.html'));
+// ------------------
+// Serve React Frontend
+// ------------------
+app.use(express.static(path.join(__dirname, '../frontend/build')));
+
+
+// Fallback route for React Router
+app.get(/.*/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
 });
 
 
-app.listen(5000, () => console.log('Backend running on http://localhost:5000'));
+// ------------------
+// Start Server
+// ------------------
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
