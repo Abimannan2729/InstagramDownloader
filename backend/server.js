@@ -73,5 +73,12 @@ app.post('/api/download', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+const path = require('path');
+app.use(express.static(path.join(__dirname, 'frontend', 'build')));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend', 'build', 'index.html'));
+});
+
 
 app.listen(5000, () => console.log('Backend running on http://localhost:5000'));
