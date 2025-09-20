@@ -1,96 +1,62 @@
-// backend/server.js
-const express = require('express');
-const axios = require('axios');
-const cheerio = require('cheerio');
-const cors = require('cors');
-const path = require('path');
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const axios = require("axios");
 
 const app = express();
-
-// Middlewares
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(bodyParser.json());
 
-// ------------------
-// Instagram Download API
-// ------------------
-app.post('/api/download', async (req, res) => {
-  const { url, preview, mediaUrl } = req.body;
+const PORT = process.env.PORT || 5000;
+
+app.post("/api/download", async (req, res) => {
+  const { url, preview } = req.body;
+
+  if (!url) return res.status(400).json({ error: "No URL provided" });
 
   try {
-    if (mediaUrl) {
-      // Download specific media directly
-      const type = mediaUrl.endsWith('.mp4') ? 'video' : 'image';
-      const filename = type === 'video' ? 'instagram_video.mp4' : 'instagram_image.jpg';
-      const mediaResp = await axios.get(mediaUrl, { responseType: 'stream' });
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.setHeader('Content-Type', type === 'video' ? 'video/mp4' : 'image/jpeg');
-      return mediaResp.data.pipe(res);
+    // Fetch the Instagram page HTML
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+      },
+    });
+
+    const html = response.data;
+
+    // Extract JSON data containing media info
+    const regex = /<script type="text\/javascript">window\._sharedData = (.+);<\/script>/;
+    const match = html.match(regex);
+
+    if (!match) return res.status(404).json({ error: "Media not found" });
+
+    const sharedData = JSON.parse(match[1]);
+    const mediaData =
+      sharedData.entry_data.PostPage[0].graphql.shortcode_media;
+
+    // Normalize media into an array
+    let media = [];
+    if (mediaData.__typename === "GraphImage") {
+      media.push({ type: "image", url: mediaData.display_url });
+    } else if (mediaData.__typename === "GraphVideo") {
+      media.push({ type: "video", url: mediaData.video_url });
+    } else if (mediaData.__typename === "GraphSidecar") {
+      mediaData.edge_sidecar_to_children.edges.forEach((edge) => {
+        if (edge.node.is_video) {
+          media.push({ type: "video", url: edge.node.video_url });
+        } else {
+          media.push({ type: "image", url: edge.node.display_url });
+        }
+      });
     }
 
-    if (!url) return res.status(400).json({ error: 'No URL provided' });
-
-    // Fetch Instagram page HTML
-    const { data } = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const $ = cheerio.load(data);
-
-    let mediaList = [];
-
-    // Parse JSON from <script type="application/ld+json">
-    const scriptTag = $('script[type="application/ld+json"]').html();
-    if (scriptTag) {
-      const jsonData = JSON.parse(scriptTag);
-      if (jsonData.image) {
-        if (Array.isArray(jsonData.image)) jsonData.image.forEach(item => mediaList.push({ url: item, type: 'image' }));
-        else mediaList.push({ url: jsonData.image, type: 'image' });
-      }
-      if (jsonData.video) {
-        if (Array.isArray(jsonData.video)) jsonData.video.forEach(item => mediaList.push({ url: item, type: 'video' }));
-        else mediaList.push({ url: jsonData.video, type: 'video' });
-      }
-    }
-
-    // Fallback: og tags
-    if (mediaList.length === 0) {
-      const ogVideo = $('meta[property="og:video"]').attr('content');
-      const ogImage = $('meta[property="og:image"]').attr('content');
-      if (ogVideo) mediaList.push({ url: ogVideo, type: 'video' });
-      if (ogImage) mediaList.push({ url: ogImage, type: 'image' });
-    }
-
-    if (mediaList.length === 0) throw new Error('Unable to extract media');
-
-    if (preview) return res.json({ media: mediaList });
-
-    // Download first media by default if no mediaUrl specified
-    const first = mediaList[0];
-    const type = first.type;
-    const filename = type === 'video' ? 'instagram_video.mp4' : 'instagram_image.jpg';
-    const mediaResp = await axios.get(first.url, { responseType: 'stream' });
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', type === 'video' ? 'video/mp4' : 'image/jpeg');
-    mediaResp.data.pipe(res);
-
+    return res.json({ media });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err.message);
+    return res.status(500).json({ error: "Failed to fetch media" });
   }
 });
 
-// ------------------
-// Serve React Frontend
-// ------------------
-app.use(express.static(path.join(__dirname, '../frontend/build')));
-
-
-// Fallback route for React Router
-app.get(/.*/, (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
-});
-
-
-// ------------------
-// Start Server
-// ------------------
-const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
